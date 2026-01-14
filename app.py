@@ -29,8 +29,8 @@ def download_video():
         is_youtube = 'youtube.com' in url or 'youtu.be' in url
         
         if is_youtube:
-            # Use alternative method for YouTube
             try:
+                # Extract video ID
                 video_id = None
                 if 'youtu.be/' in url:
                     video_id = url.split('youtu.be/')[1].split('?')[0]
@@ -38,25 +38,58 @@ def download_video():
                     video_id = url.split('watch?v=')[1].split('&')[0]
                 
                 if video_id:
-                    # Return embed info for YouTube
+                    # Use RapidAPI YouTube downloader
+                    api_url = f"https://youtube-media-downloader.p.rapidapi.com/v2/video/details"
+                    headers = {
+                        "X-RapidAPI-Key": "your-api-key-here",
+                        "X-RapidAPI-Host": "youtube-media-downloader.p.rapidapi.com"
+                    }
+                    params = {"videoId": video_id}
+                    
+                    # Fallback: Use public API
+                    try:
+                        public_api = f"https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={video_id}&format=json"
+                        response = requests.get(public_api, timeout=10)
+                        if response.status_code == 200:
+                            oembed_data = response.json()
+                            
+                            result = {
+                                'success': True,
+                                'title': oembed_data.get('title', f'YouTube Video - {video_id}'),
+                                'thumbnail': oembed_data.get('thumbnail_url', f'https://img.youtube.com/vi/{video_id}/maxresdefault.jpg'),
+                                'duration': 0,
+                                'uploader': oembed_data.get('author_name', 'YouTube'),
+                                'description': 'Right-click on download button and select "Save link as" to download',
+                                'download_url': f'https://www.y2mate.com/youtube/{video_id}',
+                                'formats': [
+                                    {'quality': '1080p', 'url': f'https://www.y2mate.com/youtube/{video_id}', 'filesize': 0},
+                                    {'quality': '720p', 'url': f'https://www.y2mate.com/youtube/{video_id}', 'filesize': 0},
+                                    {'quality': '480p', 'url': f'https://www.y2mate.com/youtube/{video_id}', 'filesize': 0}
+                                ]
+                            }
+                            logger.info(f"YouTube video processed: {result['title']}")
+                            return jsonify(result)
+                    except:
+                        pass
+                    
+                    # Final fallback
                     result = {
                         'success': True,
                         'title': f'YouTube Video - {video_id}',
                         'thumbnail': f'https://img.youtube.com/vi/{video_id}/maxresdefault.jpg',
                         'duration': 0,
                         'uploader': 'YouTube',
-                        'description': 'Click download to open video in new tab',
-                        'download_url': f'https://www.youtube.com/watch?v={video_id}',
+                        'description': 'Click download to open in Y2Mate downloader',
+                        'download_url': f'https://www.y2mate.com/youtube/{video_id}',
                         'formats': [
-                            {'quality': 'HD', 'url': f'https://www.youtube.com/watch?v={video_id}', 'filesize': 0},
-                            {'quality': 'SD', 'url': f'https://www.youtube.com/watch?v={video_id}', 'filesize': 0}
+                            {'quality': 'HD', 'url': f'https://www.y2mate.com/youtube/{video_id}', 'filesize': 0}
                         ]
                     }
                     return jsonify(result)
-            except:
-                pass
+            except Exception as yt_err:
+                logger.error(f"YouTube processing error: {str(yt_err)}")
 
-        # For non-YouTube or if YouTube parsing fails, use yt-dlp
+        # For non-YouTube platforms, use yt-dlp
         ydl_opts = {
             'format': 'best[ext=mp4]/best',
             'quiet': True,
@@ -99,7 +132,7 @@ def download_video():
 
     except Exception as e:
         logger.error(f"Error: {str(e)}")
-        return jsonify({'success': False, 'error': 'Unable to process this video. Try Instagram, TikTok, or Facebook videos instead.'}), 500
+        return jsonify({'success': False, 'error': 'Unable to process this video. Please try again or use a different platform.'}), 500
 
 @app.route('/', methods=['GET'])
 def home():
