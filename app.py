@@ -25,14 +25,15 @@ def download_video():
         logger.info(f"Processing URL: {url}")
 
         ydl_opts = {
-            'format': 'best',
+            'format': 'best[ext=mp4]/best',
             'quiet': True,
             'no_warnings': True,
             'nocheckcertificate': True,
+            'geo_bypass': True,
             'extractor_args': {
                 'youtube': {
-                    'player_client': ['android_creator'],
-                    'skip': ['hls', 'dash']
+                    'player_client': ['ios', 'android_creator'],
+                    'player_skip': ['webpage', 'configs'],
                 }
             },
         }
