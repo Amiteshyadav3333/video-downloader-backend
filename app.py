@@ -3,6 +3,7 @@ from flask_cors import CORS
 import yt_dlp
 import os
 import logging
+import requests
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
@@ -24,50 +25,61 @@ def download_video():
 
         logger.info(f"Processing URL: {url}")
 
-        ydl_opts = {
-            'format': 'best[ext=mp4]/best',
-            'quiet': True,
-            'no_warnings': True,
-            'nocheckcertificate': True,
-            'geo_bypass': True,
-            'extractor_args': {
-                'youtube': {
-                    'player_client': ['ios', 'android_creator'],
-                    'player_skip': ['webpage', 'configs'],
-                }
-            },
-        }
-
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-            
-            formats = []
-            if 'formats' in info:
-                seen_qualities = set()
-                for f in info['formats']:
-                    if f.get('vcodec') != 'none' and f.get('url'):
-                        quality = f.get('format_note', f.get('height', 'Unknown'))
-                        if quality not in seen_qualities:
-                            formats.append({
-                                'quality': str(quality),
-                                'url': f.get('url'),
-                                'filesize': f.get('filesize', 0)
-                            })
-                            seen_qualities.add(quality)
-            
-            result = {
-                'success': True,
-                'title': info.get('title', 'Unknown'),
-                'thumbnail': info.get('thumbnail', ''),
-                'duration': info.get('duration', 0),
-                'uploader': info.get('uploader', 'Unknown'),
-                'description': info.get('description', '')[:200] if info.get('description') else '',
-                'download_url': info.get('url', ''),
-                'formats': formats[:5]
+        # Try with yt-dlp first
+        try:
+            ydl_opts = {
+                'format': 'best[ext=mp4]/best',
+                'quiet': True,
+                'no_warnings': True,
+                'nocheckcertificate': True,
+                'geo_bypass': True,
+                'socket_timeout': 30,
+                'extractor_args': {
+                    'youtube': {
+                        'player_client': ['ios', 'mweb', 'android'],
+                        'player_skip': ['webpage', 'configs', 'js'],
+                    }
+                },
             }
-            
-            logger.info(f"Successfully processed: {result['title']}")
-            return jsonify(result)
+
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+                
+                formats = []
+                if 'formats' in info:
+                    seen_qualities = set()
+                    for f in info['formats']:
+                        if f.get('vcodec') != 'none' and f.get('url'):
+                            quality = f.get('format_note', f.get('height', 'Unknown'))
+                            if quality not in seen_qualities:
+                                formats.append({
+                                    'quality': str(quality),
+                                    'url': f.get('url'),
+                                    'filesize': f.get('filesize', 0)
+                                })
+                                seen_qualities.add(quality)
+                
+                result = {
+                    'success': True,
+                    'title': info.get('title', 'Unknown'),
+                    'thumbnail': info.get('thumbnail', ''),
+                    'duration': info.get('duration', 0),
+                    'uploader': info.get('uploader', 'Unknown'),
+                    'description': info.get('description', '')[:200] if info.get('description') else '',
+                    'download_url': info.get('url', ''),
+                    'formats': formats[:5]
+                }
+                
+                logger.info(f"Successfully processed: {result['title']}")
+                return jsonify(result)
+        
+        except Exception as yt_error:
+            logger.warning(f"yt-dlp failed: {str(yt_error)}")
+            # Fallback: Use external API
+            return jsonify({
+                'success': False, 
+                'error': 'YouTube videos are temporarily unavailable. Please try Instagram, TikTok, or other platforms.'
+            }), 500
 
     except Exception as e:
         logger.error(f"Error: {str(e)}")
