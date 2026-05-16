@@ -1,7 +1,8 @@
 services:
   - type: web
-    name: video-downloader-api
+    name: india-search-backend
     env: python
+    rootDir: backend
     buildCommand: pip install -r requirements.txt
     startCommand: gunicorn app:app
     envVars:
