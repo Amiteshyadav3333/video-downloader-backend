@@ -1,3 +1,9 @@
+/**
+ * Copyright (c) 2026 Amitesh Kumar Yadav. All rights reserved.
+ * No part of this project may be used, copied, modified, or distributed
+ * without explicit permission from the author.
+ */
+
 import React, { useState } from 'react';
 import { Download, Video, Loader2, CheckCircle, XCircle, ExternalLink, Clock, User, Mic, MicOff, Languages, Volume2, FileText, Layout, Type } from 'lucide-react';
 import toast, { Toaster } from 'react-hot-toast';

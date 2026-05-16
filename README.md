@@ -70,5 +70,8 @@ video-downloader-full/
 - Respect the Terms of Service and Copyright of the original content platforms.
 - AI features (Voice/Translation) require an active internet connection.
 
-## 📄 License
-MIT License - Developed with ❤️ for the global Indian community.
+## ⚖️ License & Copyright
+
+**Copyright (c) 2026 Amitesh Kumar Yadav. All rights reserved.**
+
+This project is proprietary software. No part of this project may be used, copied, modified, or distributed without explicit written permission from the author. Unauthorized duplication or commercial use is strictly prohibited and subject to legal action.

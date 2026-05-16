@@ -1,3 +1,7 @@
+# Copyright (c) 2026 Amitesh Kumar Yadav. All rights reserved.
+# No part of this project may be used, copied, modified, or distributed
+# without explicit permission from the author.
+
 from flask import Flask, request, jsonify, send_file, after_this_request
 from flask_cors import CORS
 import yt_dlp
