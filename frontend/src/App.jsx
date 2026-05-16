@@ -536,8 +536,11 @@ export default function App() {
       </main>
 
       <footer className="py-12 border-t border-white/5 text-center">
-        <p className="text-slate-500 font-bold tracking-widest text-xs uppercase">
+        <p className="text-slate-500 font-bold tracking-widest text-xs uppercase mb-2">
           © 2026 IndiaSearch • Professional Content Intelligence
+        </p>
+        <p className="text-white/10 text-[10px] font-black uppercase tracking-[0.4em]">
+          v2.0 Professional Edition
         </p>
       </footer>
     </div>
