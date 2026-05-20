@@ -16,6 +16,11 @@ from deep_translator import GoogleTranslator
 from gtts import gTTS
 import tempfile
 import time
+import base64
+from PIL import Image
+import pytesseract
+import sympy
+from sympy.parsing.sympy_parser import parse_expr, standard_transformations, implicit_multiplication_application, convert_equals_signs
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
@@ -329,6 +334,131 @@ def translate_only():
     except Exception as e:
         logger.error(f"Translation Only Error: {str(e)}")
         return jsonify({'success': False, 'error': f"Language Not Supported: {str(e)}"}), 500
+
+@app.route('/translate-image', methods=['POST'])
+def translate_image():
+    try:
+        data = request.get_json()
+        image_data = data.get('image')
+        target_lang = data.get('target', 'hi')
+        source_lang = data.get('source', 'auto')
+
+        if not image_data:
+            return jsonify({'success': False, 'error': 'No image provided'}), 400
+
+        if ',' in image_data:
+            image_data = image_data.split(',')[1]
+
+        image_bytes = base64.b64decode(image_data)
+        image = Image.open(io.BytesIO(image_bytes))
+
+        extracted_text = pytesseract.image_to_string(image).strip()
+
+        if not extracted_text:
+            return jsonify({'success': False, 'error': 'No text could be extracted from the image.'}), 400
+
+        if source_lang == 'auto-detect': source_lang = 'auto'
+        if target_lang == 'zh': target_lang = 'zh-CN'
+
+        logger.info(f"Translating image text: {extracted_text[:50]}... from {source_lang} to {target_lang}")
+
+        try:
+            translator = GoogleTranslator(source=source_lang, target=target_lang)
+            translated = translator.translate(extracted_text)
+            return jsonify({
+                'success': True,
+                'extracted_text': extracted_text,
+                'translated_text': translated
+            })
+        except Exception as lang_err:
+            logger.error(f"Deep Translator Error: {str(lang_err)}")
+            if target_lang != 'en':
+                translator = GoogleTranslator(source='auto', target='en')
+                translated = translator.translate(extracted_text)
+                return jsonify({
+                    'success': True, 
+                    'extracted_text': extracted_text,
+                    'translated_text': translated, 
+                    'fallback': True
+                })
+            raise lang_err
+            
+    except Exception as e:
+        logger.error(f"Translation Image Error: {str(e)}")
+        return jsonify({'success': False, 'error': f"Error processing image: {str(e)}"}), 500
+
+@app.route('/solve-math', methods=['POST'])
+def solve_math():
+    try:
+        data = request.get_json()
+        image_data = data.get('image')
+        text_data = data.get('text')
+
+        if not image_data and not text_data:
+            return jsonify({'success': False, 'error': 'No image or text provided'}), 400
+
+        extracted_text = ""
+        if text_data:
+            extracted_text = text_data.strip()
+        else:
+            if ',' in image_data:
+                image_data = image_data.split(',')[1]
+
+            image_bytes = base64.b64decode(image_data)
+            image = Image.open(io.BytesIO(image_bytes))
+
+            extracted_text = pytesseract.image_to_string(image).strip()
+            
+        if not extracted_text:
+            return jsonify({'success': False, 'error': 'Could not read any math problem.'}), 400
+
+        clean_text = extracted_text.replace('\n', ' ').strip()
+        
+        equation_str = clean_text.replace('?', '').strip()
+        if equation_str.endswith('='):
+            equation_str = equation_str[:-1].strip()
+
+        transformations = standard_transformations + (implicit_multiplication_application, convert_equals_signs)
+        
+        result = ""
+        try:
+            expr = parse_expr(equation_str, transformations=transformations)
+            if isinstance(expr, sympy.Eq):
+                symbols = list(expr.free_symbols)
+                if symbols:
+                    solution = sympy.solve(expr, symbols[0])
+                    if solution:
+                        result = f"{symbols[0]} = {solution[0]}"
+                    else:
+                        result = "No solution found"
+                else:
+                    result = str(expr)
+            else:
+                result = str(sympy.N(expr) if expr.is_number else sympy.simplify(expr))
+                
+        except Exception as parse_err:
+            import re
+            math_only = re.sub(r'[^0-9\+\-\*\/\(\)\.]', '', equation_str)
+            try:
+                if math_only and len(math_only) > 1:
+                    result = str(eval(math_only))
+                else:
+                    raise Exception("Not evaluating")
+            except:
+                return jsonify({
+                    'success': False, 
+                    'error': f'Could not solve the expression. Recognized text: "{clean_text}"'
+                }), 400
+
+        return jsonify({
+            'success': True,
+            'extracted_text': clean_text,
+            'solution': result
+        })
+            
+    except Exception as e:
+        logger.error(f"Math Solver Error: {str(e)}")
+        return jsonify({'success': False, 'error': f"Error processing image: {str(e)}"}), 500
 
 @app.route('/generate-pdf-from-text', methods=['POST'])
 def generate_pdf_from_text():

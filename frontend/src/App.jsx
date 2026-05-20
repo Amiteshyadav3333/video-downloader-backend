@@ -4,23 +4,41 @@
  * without explicit permission from the author.
  */
 
-import React, { useState } from 'react';
-import { Download, Video, Loader2, CheckCircle, XCircle, ExternalLink, Clock, User, Mic, MicOff, Languages, Volume2, FileText, Layout, Type } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Download, Video, Loader2, CheckCircle, XCircle, ExternalLink, Clock, User, Mic, MicOff, Languages, Volume2, VolumeX, FileText, Layout, Type, Camera, Image as ImageIcon, Calculator } from 'lucide-react';
 import toast, { Toaster } from 'react-hot-toast';
 
+const useLocalStorage = (key, initialValue) => {
+  const [value, setValue] = useState(() => {
+    try {
+      const item = window.localStorage.getItem(key);
+      return item !== null ? JSON.parse(item) : initialValue;
+    } catch (error) {
+      return initialValue;
+    }
+  });
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(key, JSON.stringify(value));
+    } catch (error) {}
+  }, [key, value]);
+  return [value, setValue];
+};
+
 export default function App() {
-  const [activeTab, setActiveTab] = useState('downloader');
-  const [url, setUrl] = useState('');
+  const [activeTab, setActiveTab] = useLocalStorage('activeTab', 'downloader');
+  const [url, setUrl] = useLocalStorage('url', '');
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState('');
   const [resultUrl, setResultUrl] = useState('');
-  const [targetLang, setTargetLang] = useState('en');
+  const [targetLang, setTargetLang] = useLocalStorage('targetLang', 'en');
   const [isTranslating, setIsTranslating] = useState(false);
-  const [translatorText, setTranslatorText] = useState('');
-  const [translatedResult, setTranslatedResult] = useState('');
-  const [sourceLang, setSourceLang] = useState('auto');
+  const [translatorText, setTranslatorText] = useLocalStorage('translatorText', '');
+  const [translatedResult, setTranslatedResult] = useLocalStorage('translatedResult', '');
+  const [sourceLang, setSourceLang] = useLocalStorage('sourceLang', 'auto');
   const [isListening, setIsListening] = useState(false);
+  const [autoSpeak, setAutoSpeak] = useLocalStorage('autoSpeak', true);
 
   const BACKEND_URL = window.location.port === '3000' || window.location.hostname === 'localhost' 
     ? `http://${window.location.hostname}:5001`
@@ -77,13 +95,12 @@ export default function App() {
     return '🌐 Platform';
   };
 
-  const handleTranslateText = async () => {
-    if (!translatorText) {
-      toast.error("Please enter some text or use the mic!");
+  const handleTranslateText = async (showToast = true) => {
+    if (!translatorText.trim()) {
+      if (showToast) toast.error("Please enter some text or use the mic!");
       return;
     }
     setLoading(true);
-    console.log(`Translating: "${translatorText}" from ${sourceLang} to ${targetLang}`);
     try {
       const response = await fetch(`${BACKEND_URL}/translate-only`, {
         method: 'POST',
@@ -103,17 +120,28 @@ export default function App() {
       const data = await response.json();
       if (data.success) {
         setTranslatedResult(data.translated_text);
-        toast.success("Translated Successfully!");
+        if (showToast) toast.success("Translated Successfully!");
       } else {
-        toast.error(data.error || "Translation failed");
+        if (showToast) toast.error(data.error || "Translation failed");
       }
     } catch (err) {
       console.error("Translation error:", err);
-      toast.error(`Translation failed: ${err.message}`);
+      if (showToast) toast.error(`Translation failed: ${err.message}`);
     } finally {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (translatorText.trim()) {
+        handleTranslateText(false);
+      } else {
+        setTranslatedResult('');
+      }
+    }, 800);
+    return () => clearTimeout(timer);
+  }, [translatorText, sourceLang, targetLang]);
 
   const startListening = () => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -159,14 +187,242 @@ export default function App() {
     }
   };
 
-  const speakText = (text) => {
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = targetLang;
-    window.speechSynthesis.speak(utterance);
+  const playHighQualityVoice = async (text, lang) => {
+    if (window.currentAudio) {
+      window.currentAudio.pause();
+      window.currentAudio.src = "";
+    }
+    window.speechSynthesis.cancel(); // Clear any native speech
+    
+    try {
+      const response = await fetch(`${BACKEND_URL}/text-to-speech`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, lang })
+      });
+      if (response.ok) {
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        window.currentAudio = new Audio(url);
+        window.currentAudio.play().catch(e => console.log("Autoplay blocked by browser until interacted"));
+      }
+    } catch (err) {
+      console.error("Audio error", err);
+    }
   };
 
-  const [creatorText, setCreatorText] = useState('');
-  const [creatorLang, setCreatorLang] = useState('original');
+  const toggleAutoSpeak = () => {
+    if (autoSpeak) {
+      if (window.currentAudio) window.currentAudio.pause();
+      window.speechSynthesis.cancel();
+      setAutoSpeak(false);
+      toast("Auto-voice Disabled", { icon: '🔇' });
+    } else {
+      setAutoSpeak(true);
+      toast("Auto-voice Enabled", { icon: '🔊' });
+      if (translatedResult) {
+        playHighQualityVoice(translatedResult, targetLang);
+      }
+    }
+  };
+
+  useEffect(() => {
+    if (autoSpeak && translatedResult) {
+      playHighQualityVoice(translatedResult, targetLang);
+    }
+  }, [translatedResult, autoSpeak, targetLang]);
+
+  const videoRef = React.useRef(null);
+  const canvasRef = React.useRef(null);
+  const fileInputRef = React.useRef(null);
+  const [visionImage, setVisionImage] = useState(null);
+  const [isCameraActive, setIsCameraActive] = useState(false);
+  const [visionExtractedText, setVisionExtractedText] = useState('');
+  const [visionTranslatedText, setVisionTranslatedText] = useState('');
+  
+  const [mathImage, setMathImage] = useState(null);
+  const [isMathCameraActive, setIsMathCameraActive] = useState(false);
+  const [mathExtractedText, setMathExtractedText] = useState('');
+  const [mathSolution, setMathSolution] = useState('');
+  const [mathInputText, setMathInputText] = useState('');
+  const mathVideoRef = React.useRef(null);
+  const mathCanvasRef = React.useRef(null);
+  const mathFileInputRef = React.useRef(null);
+
+  const startMathCamera = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+      if (mathVideoRef.current) {
+        mathVideoRef.current.srcObject = stream;
+        setIsMathCameraActive(true);
+      }
+    } catch (err) {
+      toast.error("Camera access denied.");
+    }
+  };
+
+  const stopMathCamera = () => {
+    if (mathVideoRef.current && mathVideoRef.current.srcObject) {
+      mathVideoRef.current.srcObject.getTracks().forEach(track => track.stop());
+      setIsMathCameraActive(false);
+    }
+  };
+
+  const captureMathImage = () => {
+    if (mathVideoRef.current && mathCanvasRef.current) {
+      const context = mathCanvasRef.current.getContext('2d');
+      mathCanvasRef.current.width = mathVideoRef.current.videoWidth;
+      mathCanvasRef.current.height = mathVideoRef.current.videoHeight;
+      context.drawImage(mathVideoRef.current, 0, 0);
+      const dataUrl = mathCanvasRef.current.toDataURL('image/jpeg', 0.8);
+      setMathImage(dataUrl);
+      stopMathCamera();
+      solveMathImage(dataUrl);
+    }
+  };
+
+  const handleMathGalleryUpload = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        setMathImage(ev.target.result);
+        solveMathImage(ev.target.result);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const solveMathText = async () => {
+    if (!mathInputText) return;
+    setLoading(true);
+    setMathExtractedText('');
+    setMathSolution('');
+    setMathImage(null);
+    try {
+      const response = await fetch(`${BACKEND_URL}/solve-math`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: mathInputText })
+      });
+      const data = await response.json();
+      if (data.success) {
+        setMathExtractedText(data.extracted_text);
+        setMathSolution(data.solution);
+        toast.success("Math solved!");
+      } else {
+        toast.error(data.error || "Failed to solve math.");
+      }
+    } catch (err) {
+      toast.error("Error solving math.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const solveMathImage = async (base64Image) => {
+    setLoading(true);
+    setMathExtractedText('');
+    setMathSolution('');
+    try {
+      const response = await fetch(`${BACKEND_URL}/solve-math`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: base64Image })
+      });
+      const data = await response.json();
+      if (data.success) {
+        setMathExtractedText(data.extracted_text);
+        setMathSolution(data.solution);
+        toast.success("Math solved!");
+      } else {
+        toast.error(data.error || "Failed to solve math.");
+      }
+    } catch (err) {
+      toast.error("Error processing image.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const startCamera = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        setIsCameraActive(true);
+      }
+    } catch (err) {
+      toast.error("Camera access denied.");
+    }
+  };
+
+  const stopCamera = () => {
+    if (videoRef.current && videoRef.current.srcObject) {
+      videoRef.current.srcObject.getTracks().forEach(track => track.stop());
+      setIsCameraActive(false);
+    }
+  };
+
+  const captureImage = () => {
+    if (videoRef.current && canvasRef.current) {
+      const context = canvasRef.current.getContext('2d');
+      canvasRef.current.width = videoRef.current.videoWidth;
+      canvasRef.current.height = videoRef.current.videoHeight;
+      context.drawImage(videoRef.current, 0, 0);
+      const dataUrl = canvasRef.current.toDataURL('image/jpeg', 0.8);
+      setVisionImage(dataUrl);
+      stopCamera();
+      translateVisionImage(dataUrl);
+    }
+  };
+
+  const handleGalleryUpload = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        setVisionImage(ev.target.result);
+        translateVisionImage(ev.target.result);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const translateVisionImage = async (base64Image) => {
+    setLoading(true);
+    setVisionExtractedText('');
+    setVisionTranslatedText('');
+    try {
+      const response = await fetch(`${BACKEND_URL}/translate-image`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          image: base64Image,
+          source: sourceLang,
+          target: targetLang
+        })
+      });
+      const data = await response.json();
+      if (data.success) {
+        setVisionExtractedText(data.extracted_text);
+        setVisionTranslatedText(data.translated_text);
+        toast.success("Image translated!");
+        if (autoSpeak) {
+           playHighQualityVoice(data.translated_text, targetLang);
+        }
+      } else {
+        toast.error(data.error || "Failed to extract text from image.");
+      }
+    } catch (err) {
+      toast.error("Error processing image.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const [creatorText, setCreatorText] = useLocalStorage('creatorText', '');
+  const [creatorLang, setCreatorLang] = useLocalStorage('creatorLang', 'original');
 
   const handleCreatePdfFromText = async () => {
     if (!creatorText) { toast.error("Please paste some content!"); return; }
@@ -288,6 +544,20 @@ export default function App() {
             >
               <FileText size={18} />
               <span className="hidden md:inline">Doc Creator</span>
+            </button>
+            <button 
+              onClick={() => setActiveTab('vision')}
+              className={`flex items-center gap-2 px-4 sm:px-6 py-2.5 rounded-xl font-bold text-xs sm:text-sm transition-all ${activeTab === 'vision' ? 'tab-active text-white' : 'text-slate-400 hover:text-white'}`}
+            >
+              <Camera size={18} />
+              <span className="hidden md:inline">Vision</span>
+            </button>
+            <button 
+              onClick={() => setActiveTab('math')}
+              className={`flex items-center gap-2 px-4 sm:px-6 py-2.5 rounded-xl font-bold text-xs sm:text-sm transition-all ${activeTab === 'math' ? 'tab-active text-white' : 'text-slate-400 hover:text-white'}`}
+            >
+              <Calculator size={18} />
+              <span className="hidden md:inline">Math</span>
             </button>
           </div>
         </div>
@@ -450,11 +720,11 @@ export default function App() {
                     {translatedResult && (
                       <div className="absolute bottom-0 right-0 flex gap-2 p-6">
                         <button 
-                          onClick={() => speakText(translatedResult)} 
-                          className="p-5 bg-indigo-600/80 hover:bg-indigo-500 rounded-3xl transition-all shadow-xl backdrop-blur-md border border-white/10"
-                          title="Listen"
+                          onClick={toggleAutoSpeak} 
+                          className={`p-5 rounded-3xl transition-all shadow-xl backdrop-blur-md border border-white/10 ${autoSpeak ? 'bg-indigo-600/80 hover:bg-indigo-500 shadow-indigo-500/40' : 'bg-slate-600/80 hover:bg-slate-500'}`}
+                          title={autoSpeak ? "Disable Auto-voice" : "Enable Auto-voice"}
                         >
-                          <Volume2 size={28} />
+                          {autoSpeak ? <Volume2 size={28} className="text-white" /> : <VolumeX size={28} className="text-slate-300" />}
                         </button>
                         <button 
                           onClick={handleDownloadAudio} 
@@ -477,6 +747,213 @@ export default function App() {
                 >
                   {loading ? <Loader2 className="animate-spin mx-auto" size={32} /> : "GENERATE TRANSLATION"}
                 </button>
+              </div>
+            </div>
+          </div>
+        ) : activeTab === 'vision' ? (
+          <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+            <div className="mb-12 text-center">
+              <h2 className="text-4xl sm:text-6xl font-black text-white mb-4 tracking-tight">
+                Visual <span className="text-transparent bg-clip-text bg-gradient-to-r from-pink-400 to-purple-500">Intelligence</span>
+              </h2>
+              <p className="text-slate-400 text-lg max-w-2xl mx-auto font-medium">
+                Live translate anything using your camera or upload an image from your gallery.
+              </p>
+            </div>
+
+            <div className="glass-card rounded-[3rem] p-8 sm:p-12 shadow-2xl relative">
+              <div className="flex flex-col md:flex-row gap-8 mb-8">
+                <div className="flex-1 bg-slate-900/50 p-6 rounded-[2rem]">
+                  <label className="text-xs font-black text-pink-400 uppercase tracking-[0.2em] mb-4 block">Source Image Language</label>
+                  <select value={sourceLang} onChange={(e) => setSourceLang(e.target.value)} className="w-full bg-slate-800 border-none rounded-xl text-sm font-bold px-4 py-3 outline-none text-white focus:ring-2 ring-pink-500/20">
+                    {indianLanguages.map(l => <option key={l.code} value={l.code} className="bg-slate-900">{l.flag} {l.name}</option>)}
+                  </select>
+                </div>
+                <div className="flex-1 bg-slate-900/50 p-6 rounded-[2rem]">
+                  <label className="text-xs font-black text-purple-400 uppercase tracking-[0.2em] mb-4 block">Target Translation</label>
+                  <select value={targetLang} onChange={(e) => setTargetLang(e.target.value)} className="w-full bg-slate-800 border-none rounded-xl text-sm font-bold px-4 py-3 outline-none text-white focus:ring-2 ring-purple-500/20">
+                    {languages.map(l => <option key={l.code} value={l.code} className="bg-slate-900">{l.flag} {l.name}</option>)}
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                <div className="flex flex-col gap-4">
+                  <div className="w-full aspect-video bg-black rounded-3xl overflow-hidden relative flex items-center justify-center border border-white/10">
+                    {!visionImage && !isCameraActive && (
+                       <div className="text-center text-slate-500">
+                         <Camera size={48} className="mx-auto mb-4 opacity-50" />
+                         <p className="font-bold">Camera is off</p>
+                       </div>
+                    )}
+                    <video ref={videoRef} autoPlay playsInline className={`w-full h-full object-cover ${isCameraActive ? 'block' : 'hidden'}`} />
+                    {visionImage && !isCameraActive && <img src={visionImage} alt="Captured" className="w-full h-full object-cover" />}
+                    <canvas ref={canvasRef} className="hidden" />
+                  </div>
+                  
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    {!isCameraActive ? (
+                      <button onClick={startCamera} className="bg-pink-600 hover:bg-pink-500 text-white rounded-2xl p-4 font-bold transition-all shadow-lg flex items-center justify-center gap-2">
+                        <Camera size={20} /> Open Cam
+                      </button>
+                    ) : (
+                      <button onClick={captureImage} className="bg-emerald-600 hover:bg-emerald-500 text-white rounded-2xl p-4 font-bold transition-all shadow-lg flex items-center justify-center gap-2">
+                        <CheckCircle size={20} /> Capture
+                      </button>
+                    )}
+                    
+                    <input type="file" accept="image/*" ref={fileInputRef} className="hidden" onChange={handleGalleryUpload} />
+                    <button onClick={() => fileInputRef.current?.click()} className="bg-purple-600 hover:bg-purple-500 text-white rounded-2xl p-4 font-bold transition-all shadow-lg flex items-center justify-center gap-2">
+                      <ImageIcon size={20} /> Gallery
+                    </button>
+                    
+                    {isCameraActive && (
+                      <button onClick={stopCamera} className="bg-slate-700 hover:bg-slate-600 text-white rounded-2xl p-4 font-bold transition-all shadow-lg flex items-center justify-center gap-2">
+                        <XCircle size={20} /> Close
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <div className="bg-emerald-500/5 p-8 rounded-[2.5rem] flex flex-col relative border border-white/5">
+                  <label className="text-xs font-black text-emerald-400 uppercase tracking-[0.2em] mb-4">Extracted & Translated Result</label>
+                  
+                  {loading ? (
+                    <div className="flex-1 flex flex-col items-center justify-center text-emerald-400 gap-4">
+                      <Loader2 className="animate-spin" size={48} />
+                      <p className="font-bold animate-pulse">Analyzing & Translating Image...</p>
+                    </div>
+                  ) : (
+                    <div className="flex-1 overflow-y-auto space-y-6">
+                      {visionExtractedText && (
+                        <div>
+                          <p className="text-[10px] uppercase font-black text-slate-500 mb-2">Original Text</p>
+                          <p className="text-slate-300 font-medium">{visionExtractedText}</p>
+                        </div>
+                      )}
+                      {visionTranslatedText && (
+                        <div>
+                          <p className="text-[10px] uppercase font-black text-emerald-500 mb-2">Translated Text</p>
+                          <p className="text-2xl text-emerald-50 font-medium leading-relaxed">{visionTranslatedText}</p>
+                        </div>
+                      )}
+                      {!visionExtractedText && !visionTranslatedText && (
+                         <div className="text-slate-600 italic h-full flex items-center justify-center text-center">Capture or upload an image to see results here.</div>
+                      )}
+                    </div>
+                  )}
+
+                  {visionTranslatedText && !loading && (
+                    <div className="absolute bottom-6 right-6">
+                      <button 
+                        onClick={() => playHighQualityVoice(visionTranslatedText, targetLang)} 
+                        className="p-5 bg-emerald-600/80 hover:bg-emerald-500 rounded-3xl transition-all shadow-xl backdrop-blur-md border border-white/10 text-white"
+                        title="Listen"
+                      >
+                        <Volume2 size={24} />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : activeTab === 'math' ? (
+          <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+            <div className="mb-12 text-center">
+              <h2 className="text-4xl sm:text-6xl font-black text-white mb-4 tracking-tight">
+                Math <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-cyan-500">Solver</span>
+              </h2>
+              <p className="text-slate-400 text-lg max-w-2xl mx-auto font-medium">
+                Snap a photo or upload an image of a math problem to instantly solve it.
+              </p>
+            </div>
+
+            <div className="glass-card rounded-[3rem] p-8 sm:p-12 shadow-2xl relative">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                <div className="flex flex-col gap-4">
+                  <div className="w-full aspect-video bg-black rounded-3xl overflow-hidden relative flex items-center justify-center border border-white/10">
+                    {!mathImage && !isMathCameraActive && (
+                       <div className="text-center text-slate-500">
+                         <Calculator size={48} className="mx-auto mb-4 opacity-50" />
+                         <p className="font-bold">Camera is off</p>
+                       </div>
+                    )}
+                    <video ref={mathVideoRef} autoPlay playsInline className={`w-full h-full object-cover ${isMathCameraActive ? 'block' : 'hidden'}`} />
+                    {mathImage && !isMathCameraActive && <img src={mathImage} alt="Captured Math" className="w-full h-full object-cover" />}
+                    <canvas ref={mathCanvasRef} className="hidden" />
+                  </div>
+                  
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    {!isMathCameraActive ? (
+                      <button onClick={startMathCamera} className="bg-blue-600 hover:bg-blue-500 text-white rounded-2xl p-4 font-bold transition-all shadow-lg flex items-center justify-center gap-2">
+                        <Camera size={20} /> Open Cam
+                      </button>
+                    ) : (
+                      <button onClick={captureMathImage} className="bg-emerald-600 hover:bg-emerald-500 text-white rounded-2xl p-4 font-bold transition-all shadow-lg flex items-center justify-center gap-2">
+                        <CheckCircle size={20} /> Capture
+                      </button>
+                    )}
+                    
+                    <input type="file" accept="image/*" ref={mathFileInputRef} className="hidden" onChange={handleMathGalleryUpload} />
+                    <button onClick={() => mathFileInputRef.current?.click()} className="bg-cyan-600 hover:bg-cyan-500 text-white rounded-2xl p-4 font-bold transition-all shadow-lg flex items-center justify-center gap-2">
+                      <ImageIcon size={20} /> Gallery
+                    </button>
+                    
+                    {isMathCameraActive && (
+                      <button onClick={stopMathCamera} className="bg-slate-700 hover:bg-slate-600 text-white rounded-2xl p-4 font-bold transition-all shadow-lg flex items-center justify-center gap-2">
+                        <XCircle size={20} /> Close
+                      </button>
+                    )}
+                  </div>
+                  
+                  <div className="mt-4 flex gap-4">
+                    <input 
+                      type="text" 
+                      value={mathInputText}
+                      onChange={(e) => setMathInputText(e.target.value)}
+                      placeholder="Or type math (e.g. 5+3*2 or 2*x=10)"
+                      className="flex-1 bg-slate-900 border border-white/10 rounded-2xl px-6 py-4 outline-none focus:border-cyan-500 transition-all font-mono text-lg text-white placeholder:text-slate-500"
+                      onKeyDown={(e) => { if(e.key === 'Enter') solveMathText(); }}
+                    />
+                    <button 
+                      onClick={solveMathText}
+                      disabled={loading || !mathInputText}
+                      className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-bold rounded-2xl px-8 transition-all shadow-lg"
+                    >
+                      Solve
+                    </button>
+                  </div>
+                </div>
+
+                <div className="bg-cyan-500/5 p-8 rounded-[2.5rem] flex flex-col relative border border-white/5">
+                  <label className="text-xs font-black text-cyan-400 uppercase tracking-[0.2em] mb-4">Equation & Solution</label>
+                  
+                  {loading ? (
+                    <div className="flex-1 flex flex-col items-center justify-center text-cyan-400 gap-4">
+                      <Loader2 className="animate-spin" size={48} />
+                      <p className="font-bold animate-pulse">Solving Math Problem...</p>
+                    </div>
+                  ) : (
+                    <div className="flex-1 overflow-y-auto space-y-6">
+                      {mathExtractedText && (
+                        <div>
+                          <p className="text-[10px] uppercase font-black text-slate-500 mb-2">Detected Equation</p>
+                          <p className="text-slate-300 font-medium font-mono bg-black/30 p-4 rounded-xl">{mathExtractedText}</p>
+                        </div>
+                      )}
+                      {mathSolution && (
+                        <div>
+                          <p className="text-[10px] uppercase font-black text-cyan-500 mb-2">Answer</p>
+                          <p className="text-3xl text-cyan-50 font-black leading-relaxed font-mono">{mathSolution}</p>
+                        </div>
+                      )}
+                      {!mathExtractedText && !mathSolution && (
+                         <div className="text-slate-600 italic h-full flex items-center justify-center text-center">Capture or upload a math problem.</div>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           </div>
