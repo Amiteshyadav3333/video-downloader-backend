@@ -8,3 +8,5 @@ deep-translator==1.11.4
 gTTS==2.5.4
 gunicorn==21.2.0
 werkzeug==3.0.1
+pytesseract==0.3.13
+sympy==1.13.3
