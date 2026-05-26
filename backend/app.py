@@ -315,19 +315,102 @@ def translate_only():
         # Clean language codes
         if source == 'auto-detect': source = 'auto'
         if target == 'zh': target = 'zh-CN'
+        if target == 'bho': target = 'hi'  # Bhojpuri fallback to Hindi
         
-        logger.info(f"Translating text: {text[:50]}... from {source} to {target}")
+        logger.info(f"Translating text ({len(text)} chars): {text[:50]}... from {source} to {target}")
         
         try:
-            translator = GoogleTranslator(source=source, target=target)
-            translated = translator.translate(text)
-            return jsonify({'success': True, 'translated_text': translated})
+            # Handle very large texts by chunking (stories, articles, etc.)
+            MAX_CHUNK = 4500  # Google Translate safe limit
+            detected_lang = None
+            
+            if len(text) <= MAX_CHUNK:
+                # Normal translation
+                translator = GoogleTranslator(source=source, target=target)
+                translated = translator.translate(text)
+                
+                # Detect language if auto mode
+                if source == 'auto':
+                    try:
+                        from deep_translator import single_detection
+                        detected_lang = single_detection(text[:200], api_key=None)
+                    except Exception:
+                        # Fallback: try to detect via GoogleTranslator detect method
+                        try:
+                            from deep_translator import GoogleTranslator as GT
+                            det_translator = GT(source='auto', target='en')
+                            det_translator.translate(text[:100])
+                            detected_lang = det_translator.source
+                        except Exception:
+                            detected_lang = None
+            else:
+                # CHUNKED TRANSLATION for large text (stories, articles)
+                logger.info(f"Large text detected ({len(text)} chars), chunking...")
+                
+                # Split by paragraphs first, then by size
+                paragraphs = text.split('\n')
+                chunks = []
+                current_chunk = ""
+                
+                for para in paragraphs:
+                    if len(current_chunk) + len(para) + 1 <= MAX_CHUNK:
+                        current_chunk += ("\n" if current_chunk else "") + para
+                    else:
+                        if current_chunk:
+                            chunks.append(current_chunk)
+                        # If single paragraph is too long, split by sentences
+                        if len(para) > MAX_CHUNK:
+                            words = para.split(' ')
+                            sub_chunk = ""
+                            for word in words:
+                                if len(sub_chunk) + len(word) + 1 <= MAX_CHUNK:
+                                    sub_chunk += (" " if sub_chunk else "") + word
+                                else:
+                                    if sub_chunk:
+                                        chunks.append(sub_chunk)
+                                    sub_chunk = word
+                            if sub_chunk:
+                                chunks.append(sub_chunk)
+                        else:
+                            current_chunk = para
+                
+                if current_chunk:
+                    chunks.append(current_chunk)
+                
+                # Translate each chunk
+                translator = GoogleTranslator(source=source, target=target)
+                translated_chunks = []
+                for i, chunk in enumerate(chunks):
+                    if chunk.strip():
+                        try:
+                            translated_chunks.append(translator.translate(chunk))
+                        except Exception as chunk_err:
+                            logger.error(f"Chunk {i} translation failed: {str(chunk_err)}")
+                            translated_chunks.append(chunk)  # Keep original on failure
+                    else:
+                        translated_chunks.append("")
+                
+                translated = "\n".join(translated_chunks)
+                
+                # Detect language from first chunk
+                if source == 'auto':
+                    try:
+                        detected_lang = translator.source
+                    except Exception:
+                        detected_lang = None
+            
+            response_data = {'success': True, 'translated_text': translated}
+            if detected_lang and detected_lang != 'auto':
+                response_data['detected_language'] = detected_lang
+            
+            return jsonify(response_data)
+            
         except Exception as lang_err:
             logger.error(f"Deep Translator Error: {str(lang_err)}")
             # Fallback to English if target fails
             if target != 'en':
                 translator = GoogleTranslator(source='auto', target='en')
-                translated = translator.translate(text)
+                translated = translator.translate(text[:4500] if len(text) > 4500 else text)
                 return jsonify({'success': True, 'translated_text': translated, 'fallback': True})
             raise lang_err
             
