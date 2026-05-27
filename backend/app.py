@@ -263,6 +263,119 @@ def download_video():
 
 @app.route('/text-to-speech', methods=['POST'])
 def text_to_speech():
+    """
+    Text-to-Speech endpoint supporting all Indian + World languages.
+    Uses gTTS (Google Text-to-Speech) with proper language code mapping.
+    """
+    # gTTS supported language codes mapping
+    # Indian languages supported by gTTS
+    GTTS_LANG_MAP = {
+        # Indian Languages (22 Scheduled + Regional)
+        'hi':  'hi',   # Hindi
+        'bn':  'bn',   # Bengali
+        'te':  'te',   # Telugu
+        'mr':  'mr',   # Marathi
+        'ta':  'ta',   # Tamil
+        'gu':  'gu',   # Gujarati
+        'kn':  'kn',   # Kannada
+        'ml':  'ml',   # Malayalam
+        'pa':  'pa',   # Punjabi (Gurmukhi)
+        'or':  'or',   # Odia
+        'as':  'bn',   # Assamese → Bengali (similar script, fallback)
+        'ur':  'ur',   # Urdu
+        'ne':  'ne',   # Nepali
+        'si':  'si',   # Sinhala
+        'sa':  'hi',   # Sanskrit → Hindi (fallback)
+        'kok': 'mr',   # Konkani → Marathi (fallback)
+        'mai': 'hi',   # Maithili → Hindi (fallback)
+        'doi': 'hi',   # Dogri → Hindi (fallback)
+        'mni': 'bn',   # Manipuri → Bengali (fallback)
+        'sat': 'hi',   # Santali → Hindi (fallback)
+        'bo':  'hi',   # Bodo → Hindi (fallback)
+        'sd':  'ur',   # Sindhi → Urdu (fallback)
+        'ks':  'ur',   # Kashmiri → Urdu (fallback)
+        'bho': 'hi',   # Bhojpuri → Hindi (fallback)
+        'raj': 'hi',   # Rajasthani → Hindi (fallback)
+        'awa': 'hi',   # Awadhi → Hindi (fallback)
+        'hne': 'hi',   # Chhattisgarhi → Hindi (fallback)
+        # World Languages
+        'en':  'en',
+        'es':  'es',
+        'fr':  'fr',
+        'de':  'de',
+        'zh':  'zh',   # Chinese (Mandarin)
+        'ja':  'ja',
+        'ar':  'ar',
+        'ru':  'ru',
+        'pt':  'pt',
+        'it':  'it',
+        'ko':  'ko',
+        'tr':  'tr',
+        'nl':  'nl',
+        'pl':  'pl',
+        'th':  'th',
+        'vi':  'vi',
+        'id':  'id',
+        'fa':  'fa',
+        'sw':  'sw',
+        'uk':  'uk',
+        'ro':  'ro',
+        'cs':  'cs',
+        'sv':  'sv',
+        'hu':  'hu',
+        'el':  'el',
+        'da':  'da',
+        'fi':  'fi',
+        'no':  'no',
+        'sk':  'sk',
+        'bg':  'bg',
+        'hr':  'hr',
+        'he':  'he',
+        'iw':  'he',   # Legacy Hebrew code
+        'ms':  'ms',
+        'fil': 'tl',   # Filipino → Tagalog (gTTS code)
+        'tl':  'tl',   # Tagalog
+        'lt':  'lt',
+        'lv':  'lv',
+        'et':  'et',
+        'sl':  'sl',
+        'sr':  'sr',
+        'sq':  'sq',
+        'mk':  'mk',
+        'az':  'az',
+        'ka':  'ka',
+        'hy':  'hy',
+        'kk':  'kk',
+        'my':  'my',
+        'km':  'km',
+        'lo':  'lo',
+        'af':  'af',
+        'gl':  'es',   # Galician → Spanish (fallback)
+        'ca':  'ca',
+        'eu':  'eu',
+        'cy':  'cy',
+        'ga':  'ga',
+        'is':  'is',
+        'la':  'la',
+        'eo':  'eo',
+        'ht':  'ht',
+        'mt':  'mt',
+        'lb':  'de',   # Luxembourgish → German (fallback)
+        'bs':  'hr',   # Bosnian → Croatian (fallback)
+        'be':  'ru',   # Belarusian → Russian (fallback)
+        'am':  'am',
+        'so':  'so',
+        'ha':  'ha',
+        'yo':  'yo',
+        'ig':  'ig',
+        'zu':  'zu',
+        'ps':  'ps',
+        'mn':  'mn',
+        'uz':  'uz',
+        'az':  'az',
+        'ms':  'ms',
+    }
+    
     try:
         data = request.get_json()
         text = data.get('text')
@@ -270,20 +383,29 @@ def text_to_speech():
         
         if not text:
             return jsonify({'success': False, 'error': 'No text provided'}), 400
-            
-        # Clean lang code (e.g. 'zh-CN' to 'zh')
-        clean_lang = lang.split('-')[0]
-        if clean_lang == 'iw': clean_lang = 'he' # gTTS uses 'he'
         
-        logger.info(f"Generating TTS for language: {clean_lang}")
+        # Normalize lang code
+        clean_lang = lang.split('-')[0].lower()
         
-        tts = gTTS(text=text, lang=clean_lang)
+        # Map to gTTS supported code
+        gtts_lang = GTTS_LANG_MAP.get(clean_lang, clean_lang)
         
-        # Create a temp file
+        logger.info(f"TTS request: lang={lang} → gtts_lang={gtts_lang}, text_len={len(text)}")
+        
+        # Try primary language, fallback to English on error
+        try:
+            tts = gTTS(text=text, lang=gtts_lang)
+        except Exception as lang_err:
+            logger.warning(f"gTTS lang '{gtts_lang}' failed ({str(lang_err)}), trying English fallback")
+            try:
+                tts = gTTS(text=text, lang='en')
+            except Exception:
+                return jsonify({'success': False, 'error': f'TTS not available for language: {lang}'}), 400
+        
+        # Save to temp file
         temp_dir = tempfile.gettempdir()
-        temp_filename = f"speech_{int(time.time())}.mp3"
+        temp_filename = f"speech_{int(time.time() * 1000)}.mp3"
         temp_path = os.path.join(temp_dir, temp_filename)
-        
         tts.save(temp_path)
         
         @after_this_request
@@ -294,8 +416,13 @@ def text_to_speech():
             except Exception as e:
                 logger.error(f"Error removing temp file: {str(e)}")
             return response
-            
-        return send_file(temp_path, as_attachment=True, download_name="translation_voice.mp3", mimetype="audio/mpeg")
+        
+        return send_file(
+            temp_path,
+            as_attachment=True,
+            download_name=f"speech_{gtts_lang}.mp3",
+            mimetype="audio/mpeg"
+        )
         
     except Exception as e:
         logger.error(f"TTS Error: {str(e)}")
@@ -312,10 +439,31 @@ def translate_only():
         if not text:
             return jsonify({'success': False, 'error': 'Text is required'}), 400
             
-        # Clean language codes
+        # Clean language codes — handle all Indian + World languages
         if source == 'auto-detect': source = 'auto'
-        if target == 'zh': target = 'zh-CN'
-        if target == 'bho': target = 'hi'  # Bhojpuri fallback to Hindi
+        
+        # Language code normalization for Google Translate API
+        GTRANSLATE_LANG_MAP = {
+            # Indian language adjustments
+            'zh': 'zh-CN',      # Chinese → Simplified Chinese
+            'bho': 'hi',        # Bhojpuri → Hindi (not supported separately)
+            'raj': 'hi',        # Rajasthani → Hindi
+            'awa': 'hi',        # Awadhi → Hindi
+            'hne': 'hi',        # Chhattisgarhi → Hindi
+            'kok': 'mr',        # Konkani → Marathi (similar)
+            'mai': 'hi',        # Maithili → Hindi
+            'doi': 'hi',        # Dogri → Hindi
+            'mni': 'bn',        # Manipuri → Bengali
+            'sat': 'hi',        # Santali → Hindi
+            'bo': 'hi',         # Bodo → Hindi
+            'ks': 'ur',         # Kashmiri → Urdu
+            'sd': 'ur',         # Sindhi → Urdu
+            'fil': 'tl',        # Filipino → Tagalog
+            'iw': 'he',         # Legacy Hebrew code
+        }
+        
+        source = GTRANSLATE_LANG_MAP.get(source, source)
+        target = GTRANSLATE_LANG_MAP.get(target, target)
         
         logger.info(f"Translating text ({len(text)} chars): {text[:50]}... from {source} to {target}")
         
